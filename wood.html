@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Three.js Cubie Grid</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.min.js"></script>
+    <script src="pieces.js" type="text/javascript"></script>
+    <script src="helpers.js" type="text/javascript"></script>
+    <script>
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xeeeeee);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffffff, 3);
+
+        light.position.set(5, 5, 10);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(light);
+        scene.add(ambientLight);
+
+        class Piece {
+            constructor(coords, id, type) {
+                this.coords = coords;
+                this.id = id;
+                this.type = type;
+            }
+        }
+
+        const L_SHAPE_LARGE = 1;
+        const L_SHAPE_SMALL = 2;
+        const Z_SHAPE = 3;
+        const T_SHAPE = 4;
+
+        function generateCubies() {
+            let cubies = [];
+            for (let i = -1; i < 2; i++) {
+                for (let j = -1; j < 2; j++) {
+                    for (let k = -1; k < 2; k++) {
+                        cubies.push([i, j, k]);
+                    }
+                }
+            }
+            return cubies;
+        }
+
+        const cubies = generateCubies();
+
+        function placePiece(piece) {
+            for (let v of piece.coords) {
+                if (cube[v.x + 1][v.y + 1][v.z + 1] != 0) {
+                    return false;
+                }
+            }
+
+            for (let v of piece.coords) {
+                cube[v.x + 1][v.y + 1][v.z + 1] = 1;
+            }
+            return true;
+        }
+
+        function removePiece(piece) {
+            for (let v of piece.coords) {
+                cube[v.x + 1][v.y + 1][v.z + 1] = 0;
+            }
+        }
+
+        function generateValidTranslations(piece, targetCoord) {
+            const validTranslations = [];
+
+            for (let anchorIndex = 0; anchorIndex < piece.coords.length; anchorIndex++) {
+                const anchorPos = piece.coords[anchorIndex];
+                let allInside = true;
+                const newCoords = [];
+
+                for (let i = 0; i < piece.coords.length; i++) {
+                    const relative = piece.coords[i].clone().sub(anchorPos);
+                    const absolute = relative.add(targetCoord);
+
+                    if (
+                        absolute.x < -1 || absolute.x > 1 ||
+                        absolute.y < -1 || absolute.y > 1 ||
+                        absolute.z < -1 || absolute.z > 1
+                    ) {
+                        allInside = false;
+                        break;
+                    }
+                    newCoords.push(absolute);
+                }
+
+                if (allInside) {
+                    validTranslations.push(new Piece(newCoords, piece.id, piece.type));
+                }
+            }
+
+            return validTranslations;
+        }
+
+        function generateAllUniqueRotations(shape) {
+            const matrixX = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+            const matrixY = new THREE.Matrix4().makeRotationY(Math.PI / 2);
+            const matrixZ = new THREE.Matrix4().makeRotationZ(Math.PI / 2);
+
+            const rotations = new Set();
+
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    for (let k = 0; k < 4; k++) {
+
+                        let shapeCopy = copyShape(shape);
+
+                        const transform = new THREE.Matrix4();
+                        transform.multiplyMatrices(matrixX.clone().premultiplyN(i),
+                            matrixY.clone().premultiplyN(j))
+                            .multiply(matrixZ.clone().premultiplyN(k));
+
+                        shapeCopy.forEach(v => v.applyMatrix4(transform));
+
+                        // Normalize and serialize to string
+                        const key = shapeCopy
+                            .map(v => `${Math.round(v.x * 1000)},${Math.round(v.y * 1000)},${Math.round(v.z * 1000)}`)
+                            .sort()
+                            .join('|');
+
+                        rotations.add(key);
+                    }
+                }
+            }
+
+            return Array.from(rotations).map(key =>
+                key.split('|').map(str => {
+                    const [x, y, z] = str.split(',').map(n => parseFloat(n) / 1000);
+                    return new THREE.Vector3(x, y, z);
+                })
+            );
+        }
+
+        THREE.Matrix4.prototype.premultiplyN = function (n) {
+            const result = new THREE.Matrix4().identity();
+            for (let i = 0; i < n; i++) {
+                result.premultiply(this);
+            }
+            return result;
+        };
+
+        const cubieSize = 1;
+
+        const Lshape = new Piece(LshapeCoords, 0, L_SHAPE_LARGE);
+        const Lshape2 = new Piece(LshapeCoords2, 1, L_SHAPE_LARGE);
+        const Lshape3 = new Piece(LshapeCoords3, 2, L_SHAPE_LARGE);
+        const Lshape4 = new Piece(LshapeCoords4, 3, L_SHAPE_LARGE);
+        const Tshape = new Piece(TshapeCoords, 4, T_SHAPE);
+        const smallLshape = new Piece(smallLshapeCoords, 5, L_SHAPE_SMALL);
+        const Zshape = new Piece(ZshapeCoords, 6, Z_SHAPE);
+
+        const textureLoader = new THREE.TextureLoader();
+        const woodTexture = textureLoader.load('wood.jpeg');
+        const woodTexture2 = textureLoader.load('wood.png');
+        const woodTexture3 = textureLoader.load('wood2.jpeg');
+        const woodTexture4 = textureLoader.load('wood3.jpeg');
+
+        const pieces = [Lshape, Lshape2, Lshape3, Lshape4, Tshape, smallLshape, Zshape];
+
+        const cube = [
+            [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+            [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+            [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+        ];
+
+        function recurse(pieceList, cubieIdx) {
+            if (cubieIdx >= 27) {
+                console.log("solution found!");
+                console.log(pieceList);
+                return true;
+            }
+            let x = cubies[cubieIdx][0];
+            let y = cubies[cubieIdx][1];
+            let z = cubies[cubieIdx][2];
+
+            if (cube[x + 1][y + 1][z + 1] != 0) {
+                return (recurse(pieceList, cubieIdx + 1));
+            }
+
+            let curPos = new THREE.Vector3(x, y, z);
+            for (let piece of pieces) {
+
+                let used = false;
+
+                for (let p of pieceList) {
+                    if (p.id == piece.id) {
+                        used = true;
+                        break;
+                    }
+                }
+
+                if (used) {
+                    continue;
+                }
+
+                let candidatePieces = generateAllValidCandidates(piece, curPos);
+
+                for (let cand of candidatePieces) {
+                    if (placePiece(cand)) {
+                        pieceList.push(cand);
+                        if (recurse(pieceList, cubieIdx + 1)) {
+                            return true;
+                        }
+                        pieceList.pop();
+                        removePiece(cand);
+                    }
+                }
+            }
+            return false;
+        }
+
+        function generateRotatedPieces(piece) {
+
+            let rotatedPieces = [];
+            let rotatedCoords = generateAllUniqueRotations(piece.coords);
+
+            for (let coord of rotatedCoords) {
+                let rotPiece = new Piece(coord, piece.id, piece.type);
+                rotatedPieces.push(rotPiece);
+            }
+            return rotatedPieces;
+        }
+
+        function generateAllValidCandidates(piece, coord) {
+            let rotated = generateRotatedPieces(piece);
+            let result = [];
+            for (let rot of rotated) {
+                result.push(...generateValidTranslations(rot, coord));
+            }
+            return result;
+        }
+
+        const offsets = [
+            new THREE.Vector3(0, 10, 0),
+            new THREE.Vector3(0, 20, 0),
+            new THREE.Vector3(0, 30, 0),
+            new THREE.Vector3(0, 40, 0),
+            new THREE.Vector3(0, 50, 0),
+            new THREE.Vector3(0, 60, 0),
+            new THREE.Vector3(0, 70, 0),
+        ];
+
+        const geometry = new THREE.BoxGeometry(cubieSize, cubieSize, cubieSize);
+
+        const materials = [
+            new THREE.MeshStandardMaterial({ map: woodTexture }),
+            new THREE.MeshStandardMaterial({ map: woodTexture2 }),
+            new THREE.MeshStandardMaterial({ map: woodTexture }),
+            new THREE.MeshStandardMaterial({ map: woodTexture3 }),
+            new THREE.MeshStandardMaterial({ map: woodTexture }),
+            new THREE.MeshStandardMaterial({ map: woodTexture2 }),
+            new THREE.MeshStandardMaterial({ map: woodTexture3 }),
+        ];
+
+        let groups = [];
+        let idx = 0;
+
+        for (const piece of pieces) {
+            const cubieGroup = new THREE.Group();
+            for (const coord of piece.coords) {
+                const mesh = new THREE.Mesh(geometry, materials[idx]);
+                mesh.position.copy(coord);
+                cubieGroup.add(mesh);
+            }
+            cubieGroup.position.copy(offsets[idx]);
+            scene.add(cubieGroup);
+            groups.push(cubieGroup);
+            idx++;
+        }
+
+        recurse([], 0);
+
+        camera.position.set(5, 10, 10);
+        camera.lookAt(0, 0, 0);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            for (const g of groups) {
+                if (g.position.y > 0) {
+                    g.position.y -= 0.1;
+                } else {
+                    g.position.y = 0;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+
+</html>
