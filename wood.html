@@ -44,6 +44,13 @@
             }
         }
 
+        class Solution {
+            constructor(pieceArray, cube) {
+                this.pieceArray = pieceArray;
+                this.cube = cube;
+            }
+        }
+
         const L_SHAPE_LARGE = 1;
         const L_SHAPE_SMALL = 2;
         const Z_SHAPE = 3;
@@ -71,7 +78,7 @@
             }
 
             for (let v of piece.coords) {
-                cube[v.x + 1][v.y + 1][v.z + 1] = 1;
+                cube[v.x + 1][v.y + 1][v.z + 1] = piece.type;
             }
             return true;
         }
@@ -113,6 +120,8 @@
             return validTranslations;
         }
 
+        var rotationCache = [];
+
         function generateAllUniqueRotations(shape) {
             const matrixX = new THREE.Matrix4().makeRotationX(Math.PI / 2);
             const matrixY = new THREE.Matrix4().makeRotationY(Math.PI / 2);
@@ -133,7 +142,6 @@
 
                         shapeCopy.forEach(v => v.applyMatrix4(transform));
 
-                        // Normalize and serialize to string
                         const key = shapeCopy
                             .map(v => `${Math.round(v.x * 1000)},${Math.round(v.y * 1000)},${Math.round(v.z * 1000)}`)
                             .sort()
@@ -178,27 +186,44 @@
 
         const pieces = [Lshape, Lshape2, Lshape3, Lshape4, Tshape, smallLshape, Zshape];
 
+
         const cube = [
             [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
             [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
             [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
         ];
 
+        var solutionsFound = 0;
+        var solutions = [];
+
+
         function recurse(pieceList, cubieIdx) {
             if (cubieIdx >= 27) {
-                console.log("solution found!");
-                console.log(pieceList);
-                return true;
+
+                var cubeCopy = JSON.parse(JSON.stringify(cube));
+                var pieceListCopy = JSON.parse(JSON.stringify(pieceList));
+
+                solutions.push(new Solution(pieceListCopy, cubeCopy));
+                solutionsFound++;
+                return;
             }
+
+            if (solutionsFound > 10000) {
+                return;
+            }
+
             let x = cubies[cubieIdx][0];
             let y = cubies[cubieIdx][1];
             let z = cubies[cubieIdx][2];
 
             if (cube[x + 1][y + 1][z + 1] != 0) {
-                return (recurse(pieceList, cubieIdx + 1));
+                (recurse(pieceList, cubieIdx + 1));
+                return;
             }
 
             let curPos = new THREE.Vector3(x, y, z);
+            let typesUsedForCurrent = [0, 0, 0, 0, 0];
+
             for (let piece of pieces) {
 
                 let used = false;
@@ -214,20 +239,23 @@
                     continue;
                 }
 
+                if (typesUsedForCurrent[piece.type] != 0) {
+                    continue;
+                }
+
+                typesUsedForCurrent[piece.type] = 1;
+
                 let candidatePieces = generateAllValidCandidates(piece, curPos);
 
                 for (let cand of candidatePieces) {
                     if (placePiece(cand)) {
                         pieceList.push(cand);
-                        if (recurse(pieceList, cubieIdx + 1)) {
-                            return true;
-                        }
+                        recurse(pieceList, cubieIdx + 1);
                         pieceList.pop();
                         removePiece(cand);
                     }
                 }
             }
-            return false;
         }
 
         function generateRotatedPieces(piece) {
@@ -242,8 +270,13 @@
             return rotatedPieces;
         }
 
+        for (let i = 0; i < pieces.length; i++) {
+            rotationCache[i] = generateRotatedPieces(pieces[i]);
+        }
+
         function generateAllValidCandidates(piece, coord) {
-            let rotated = generateRotatedPieces(piece);
+            let rotated = rotationCache[piece.id];
+
             let result = [];
             for (let rot of rotated) {
                 result.push(...generateValidTranslations(rot, coord));
@@ -273,35 +306,61 @@
             new THREE.MeshStandardMaterial({ map: woodTexture3 }),
         ];
 
-        let groups = [];
-        let idx = 0;
+        let GROUPS = [];
 
-        for (const piece of pieces) {
-            const cubieGroup = new THREE.Group();
-            for (const coord of piece.coords) {
-                const mesh = new THREE.Mesh(geometry, materials[idx]);
-                mesh.position.copy(coord);
-                cubieGroup.add(mesh);
+        function createMeshes(piecesArr) {
+            let groups = [];
+            let idx = 0;
+
+            for (const piece of piecesArr) {
+                const cubieGroup = new THREE.Group();
+                for (const coord of piece.coords) {
+                    const mesh = new THREE.Mesh(geometry, materials[idx]);
+                    mesh.position.copy(coord);
+                    cubieGroup.add(mesh);
+                }
+                cubieGroup.position.copy(offsets[idx]);
+                scene.add(cubieGroup);
+                groups.push(cubieGroup);
+                idx++;
             }
-            cubieGroup.position.copy(offsets[idx]);
-            scene.add(cubieGroup);
-            groups.push(cubieGroup);
-            idx++;
+            return groups;
         }
 
+
         recurse([], 0);
+
+        console.log(solutions);
+
+        const deduped = deduplicateShapes(solutions);
+
+        console.log(deduped);
+        let solIdx = 0;
 
         camera.position.set(5, 10, 10);
         camera.lookAt(0, 0, 0);
 
+        let frame = 0;
+
         function animate() {
+            if (frame % 1000 == 0) {
+                for (let g of GROUPS) {
+                    scene.remove(g);
+                }
+                GROUPS = createMeshes(solutions[solIdx].pieceArray);
+                solIdx++;
+            }
+
+            frame++;
+
             requestAnimationFrame(animate);
-            for (const g of groups) {
+            for (const g of GROUPS) {
                 if (g.position.y > 0) {
                     g.position.y -= 0.1;
                 } else {
                     g.position.y = 0;
                 }
+
             }
 
             renderer.render(scene, camera);
